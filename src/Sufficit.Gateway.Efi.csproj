@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>Sufficit.Gateway.Efi</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PkgVersion>9.*</PkgVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PkgVersion>10.*</PkgVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="$(PkgVersion)" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(PkgVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="$(PkgVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(PkgVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(PkgVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\sufficit-base\src\Sufficit.Base.csproj" Condition="Exists('..\..\sufficit-base\src\Sufficit.Base.csproj')" />
+    <PackageReference Include="Sufficit.Base" Version="1.*" Condition="!Exists('..\..\sufficit-base\src\Sufficit.Base.csproj')" />
+  </ItemGroup>
+</Project>

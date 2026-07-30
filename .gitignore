@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/TestResults/
+**/publish/
+coverage/
+.idea/
+.vs/
+.DS_Store
+*.user
+*.suo
+*.nupkg
+*.token
