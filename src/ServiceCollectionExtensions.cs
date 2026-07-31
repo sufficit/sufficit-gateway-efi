@@ -7,18 +7,20 @@ namespace Sufficit.Gateway.Efi;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddSufficitEfiBankSlipGateway(
+    public static IServiceCollection AddSufficitGatewayEfi(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddOptions<EfiBankSlipGatewayOptions>()
-            .Bind(configuration.GetSection(EfiBankSlipGatewayOptions.SectionName));
+        services.AddOptions<EfiGatewayOptions>()
+            .Bind(configuration.GetSection(EfiGatewayOptions.SectionName));
 
-        services.AddHttpClient(EfiBankSlipGateway.HttpClientName);
+        services.AddHttpClient(EfiGateway.HttpClientName);
 
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IBankSlipGateway, EfiBankSlipGateway>());
-        services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IBankSlipProviderDiagnosticsGateway, EfiBankSlipGateway>());
+        services.TryAddSingleton<EfiGateway>();
+        services.AddSingleton<IBankSlipGateway>(
+            serviceProvider => serviceProvider.GetRequiredService<EfiGateway>());
+        services.AddSingleton<IBankSlipProviderDiagnosticsGateway>(
+            serviceProvider => serviceProvider.GetRequiredService<EfiGateway>());
 
         return services;
     }

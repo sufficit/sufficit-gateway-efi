@@ -1,14 +1,16 @@
 # Sufficit Gateway Efí
 
-Integração HTTP tipada da Sufficit com a API Cobranças Efí.
+Integração HTTP tipada da Sufficit com as APIs Efí.
 
-O projeto implementa `IBankSlipGateway` e
+`EfiGateway` é a fachada geral do provedor. Cada produto é implementado como
+uma capacidade parcial; a primeira capacidade implementa `IBankSlipGateway` e
 `IBankSlipProviderDiagnosticsGateway` para o provider persistido `efi`, sem
-referenciar o SDK legado da Gerencianet.
+referenciar nem alterar o SDK ou o gateway legado da Gerencianet.
 
 ## Responsabilidades
 
-- autenticar por OAuth2 `client_credentials`;
+- compartilhar autenticação, cliente HTTP, configuração e credenciais entre
+  as capacidades Efí;
 - emitir, consultar e cancelar boletos;
 - reconciliar resultados ambíguos antes de permitir uma nova emissão;
 - normalizar estados, erros e orientações operacionais;
@@ -34,21 +36,24 @@ resultado ambíguo até que uma consulta descarte a criação da cobrança.
 O host registra o gateway e a infraestrutura neutra separadamente:
 
 ```csharp
-services.AddSufficitBankSlipGatewayInfrastructure(configuration);
-services.AddSufficitEfiBankSlipGateway(configuration);
+services.AddSufficitGatewayInfrastructure(configuration);
+services.AddSufficitBankSlipInfrastructure(configuration);
+services.AddSufficitGatewayEfi(configuration);
 ```
 
-As opções HTTP ficam em `BankSlips:Providers:Efi`:
+As opções e credenciais do provedor ficam em `Sufficit:Gateway:Efi`. Nenhuma
+configuração geral do Efí pertence ao módulo de boletos:
 
 ```json
 {
-  "BankSlips": {
-    "Providers": {
+  "Sufficit": {
+    "Gateway": {
       "Efi": {
-        "SandboxBaseAddress": "https://cobrancas-h.api.efipay.com.br/",
-        "ProductionBaseAddress": "https://cobrancas.api.efipay.com.br/",
+        "BillingSandboxBaseAddress": "https://cobrancas-h.api.efipay.com.br/",
+        "BillingProductionBaseAddress": "https://cobrancas.api.efipay.com.br/",
         "Timeout": "00:00:30",
-        "TokenClockSkew": "00:00:30"
+        "TokenClockSkew": "00:00:30",
+        "Credentials": {}
       }
     }
   }
@@ -56,7 +61,7 @@ As opções HTTP ficam em `BankSlips:Providers:Efi`:
 ```
 
 Client ID e Client Secret não pertencem a este repositório nem ao payload das
-filas. O host resolve referências opacas por `IBankSlipCredentialResolver` a
+filas. O host resolve referências opacas por `IGatewayCredentialResolver` a
 partir da configuração protegida.
 
 ## Validação

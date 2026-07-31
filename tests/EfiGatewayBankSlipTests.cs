@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Sufficit.Gateway.Efi.Tests;
 
-public class EfiBankSlipGatewayTests
+public class EfiGatewayBankSlipTests
 {
     [Fact]
     public async Task CreateAsyncUsesSandboxOAuthAndTwoStepFlow()
@@ -145,24 +145,24 @@ public class EfiBankSlipGatewayTests
     }
 
     [Fact]
-    public async Task CreateAsyncRejectsIncompleteAddressBeforeCreatingEfiCharge()
+    public async Task CreateAsyncOmitsIncompleteOptionalAddress()
     {
         var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""{"code":200,"data":{"charge_id":12345,"status":"new"}}""");
+        handler.EnqueueJson(
+            """{"code":200,"data":{"charge_id":12345,"status":"waiting","barcode":"0019000009","link":"https://sandbox.efi.example/billet/12345"}}""");
         var gateway = GatewayTestFactory.CreateEfi(handler);
         var request = CreateIssueRequest();
         request.Payer.Address!.Number = string.Empty;
 
-        var exception = await Assert.ThrowsAsync<BankSlipGatewayException>(
-            () => gateway.CreateAsync(
-                request,
-                CreateContext(),
-                CancellationToken.None));
+        await gateway.CreateAsync(
+            request,
+            CreateContext(),
+            CancellationToken.None);
 
-        Assert.Equal(BankSlipErrorCategory.Validation, exception.Category);
-        Assert.Equal("efi_payer_address_number_missing", exception.ErrorCode);
-        Assert.Equal("O número do endereço não foi informado", exception.ErrorTitle);
-        Assert.Contains("cadastro", exception.ErrorAction, StringComparison.Ordinal);
-        Assert.Empty(handler.Requests);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.DoesNotContain("\"address\":", handler.Requests[2].Body);
     }
 
     [Fact]
@@ -236,6 +236,9 @@ public class EfiBankSlipGatewayTests
 
         Assert.Contains("\"phone_number\":\"31999999999\"", handler.Requests[2].Body);
         Assert.DoesNotContain("\"phone_number\":\"5531999999999\"", handler.Requests[2].Body);
+        Assert.Contains("\"address\":{", handler.Requests[2].Body);
+        Assert.Contains("\"number\":\"100\"", handler.Requests[2].Body);
+        Assert.Contains("\"zipcode\":\"30100000\"", handler.Requests[2].Body);
     }
 
     [Fact]

@@ -1,29 +1,30 @@
 using Microsoft.Extensions.DependencyInjection;
 using Sufficit.Finance;
+using Sufficit.Gateway;
 
 namespace Sufficit.Gateway.Efi.Tests;
 
 internal static class GatewayTestFactory
 {
-    public static EfiBankSlipGateway CreateEfi(RecordingHttpMessageHandler handler)
+    public static EfiGateway CreateEfi(RecordingHttpMessageHandler handler)
     {
         var services = CreateServices();
-        services.Configure<EfiBankSlipGatewayOptions>(options =>
+        services.Configure<EfiGatewayOptions>(options =>
         {
             options.Timeout = TimeSpan.FromSeconds(5);
             options.TokenClockSkew = TimeSpan.Zero;
         });
-        services.AddHttpClient(EfiBankSlipGateway.HttpClientName)
+        services.AddHttpClient(EfiGateway.HttpClientName)
             .ConfigurePrimaryHttpMessageHandler(() => handler);
-        services.AddSingleton<EfiBankSlipGateway>();
-        return services.BuildServiceProvider().GetRequiredService<EfiBankSlipGateway>();
+        services.AddSingleton<EfiGateway>();
+        return services.BuildServiceProvider().GetRequiredService<EfiGateway>();
     }
 
     private static ServiceCollection CreateServices()
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton<IBankSlipCredentialResolver, StaticBankSlipCredentialResolver>();
+        services.AddSingleton<IGatewayCredentialResolver, StaticGatewayCredentialResolver>();
         return services;
     }
 }

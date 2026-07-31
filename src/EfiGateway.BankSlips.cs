@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Sufficit.Finance;
+using Sufficit.Gateway;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
@@ -13,37 +13,19 @@ using System.Text.Json.Serialization;
 namespace Sufficit.Gateway.Efi;
 
 /// <summary>
-/// Implements the Efí Billing API two-step bank slip flow without the legacy SDK.
+/// Exposes the Efí API. This partial contains the two-step bank slip capability.
 /// </summary>
-public sealed class EfiBankSlipGateway : IBankSlipGateway, IBankSlipProviderDiagnosticsGateway
+public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiagnosticsGateway
 {
-    public const string HttpClientName = "Sufficit.BankSlips.Efi";
-
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IBankSlipCredentialResolver _credentialResolver;
-    private readonly IOptionsMonitor<EfiBankSlipGatewayOptions> _options;
-    private readonly ILogger<EfiBankSlipGateway> _logger;
     private readonly ConcurrentDictionary<string, EfiAccessToken> _tokens = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _tokenLocks = new(StringComparer.Ordinal);
 
-    public EfiBankSlipGateway(
-        IHttpClientFactory httpClientFactory,
-        IBankSlipCredentialResolver credentialResolver,
-        IOptionsMonitor<EfiBankSlipGatewayOptions> options,
-        ILogger<EfiBankSlipGateway> logger)
-    {
-        _httpClientFactory = httpClientFactory;
-        _credentialResolver = credentialResolver;
-        _options = options;
-        _logger = logger;
-    }
-
-    public string ProviderCode => BankSlipProviderCodes.Efi;
+    public string ProviderCode => ProviderCodeValue;
 
     public async Task<BankSlipProviderDiagnosticGatewayResult?> ExecuteDiagnosticAsync(
         BankSlipProviderDiagnosticParameters parameters,
@@ -315,9 +297,21 @@ public sealed class EfiBankSlipGateway : IBankSlipGateway, IBankSlipProviderDiag
                 return cachedToken;
             }
 
-            var credential = await _credentialResolver
-                .GetRequiredAsync(ProviderCode, context, cancellationToken)
-                .ConfigureAwait(false);
+            GatewayCredential credential;
+            try
+            {
+                credential = await _credentialResolver
+                    .GetRequiredAsync(ProviderCode, ToGatewayContext(context), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (GatewayCredentialException exception)
+            {
+                throw new BankSlipGatewayException(
+                    BankSlipErrorCategory.DefinitiveRejection,
+                    "efi_credentials_missing",
+                    "Efí credentials are not configured for the selected tenant.",
+                    innerException: exception);
+            }
             if (string.IsNullOrWhiteSpace(credential.ClientId) || string.IsNullOrWhiteSpace(credential.ClientSecret))
             {
                 throw new BankSlipGatewayException(
@@ -403,12 +397,22 @@ public sealed class EfiBankSlipGateway : IBankSlipGateway, IBankSlipProviderDiag
     private static string GetTokenCacheKey(BankSlipGatewayContext context)
         => $"{context.TenantId:N}:{(byte)context.Environment}:{context.CredentialReference}";
 
+    private static GatewayCallContext ToGatewayContext(BankSlipGatewayContext context)
+        => new()
+        {
+            TenantId = context.TenantId,
+            Environment = context.Environment == BankSlipProviderEnvironment.Production
+                ? GatewayEnvironment.Production
+                : GatewayEnvironment.Sandbox,
+            CredentialReference = context.CredentialReference
+        };
+
     private Uri BuildUri(BankSlipGatewayContext context, string relativePath)
     {
         var options = _options.CurrentValue;
         var baseAddress = context.Environment == BankSlipProviderEnvironment.Production
-            ? options.ProductionBaseAddress
-            : options.SandboxBaseAddress;
+            ? options.BillingProductionBaseAddress
+            : options.BillingSandboxBaseAddress;
         return new Uri(baseAddress, relativePath);
     }
 
@@ -441,17 +445,18 @@ public sealed class EfiBankSlipGateway : IBankSlipGateway, IBankSlipProviderDiag
             customer["cpf"] = document;
         }
 
-        if (payer.Address is not null)
+        if (CanSendAddress(payer.Address))
         {
+            var address = payer.Address!;
             customer["address"] = new Dictionary<string, object?>
             {
-                ["street"] = payer.Address.Street,
-                ["number"] = payer.Address.Number,
-                ["neighborhood"] = payer.Address.Neighborhood,
-                ["zipcode"] = OnlyDigits(payer.Address.PostalCode),
-                ["city"] = payer.Address.City,
-                ["complement"] = payer.Address.Complement,
-                ["state"] = payer.Address.State
+                ["street"] = address.Street,
+                ["number"] = address.Number,
+                ["neighborhood"] = address.Neighborhood,
+                ["zipcode"] = OnlyDigits(address.PostalCode),
+                ["city"] = address.City,
+                ["complement"] = address.Complement,
+                ["state"] = address.State
             };
         }
 
@@ -761,38 +766,16 @@ public sealed class EfiBankSlipGateway : IBankSlipGateway, IBankSlipProviderDiag
                 "Efí bank slips require a Brazilian phone with 10 or 11 digits.");
         }
 
-        var address = request.Payer.Address;
-        if (address is null)
-        {
-            throw CreateValidationException(
-                "efi_payer_address_missing",
-                "Efí bank slips require the payer address.");
-        }
-
-        if (string.IsNullOrWhiteSpace(address.Street))
-        {
-            throw CreateValidationException(
-                "efi_payer_address_street_missing",
-                "Efí bank slips require the payer street.");
-        }
-
-        if (string.IsNullOrWhiteSpace(address.Number))
-        {
-            throw CreateValidationException(
-                "efi_payer_address_number_missing",
-                "Efí bank slips require the payer address number.");
-        }
-
-        if (string.IsNullOrWhiteSpace(address.Neighborhood)
-            || string.IsNullOrWhiteSpace(address.City)
-            || OnlyDigits(address.PostalCode).Length != 8
-            || address.State?.Trim().Length != 2)
-        {
-            throw CreateValidationException(
-                "efi_payer_address_incomplete",
-                "Efí bank slips require neighborhood, city, an 8-digit postal code and a 2-letter state.");
-        }
     }
+
+    private static bool CanSendAddress(BankSlipPayerAddress? address)
+        => address is not null
+            && !string.IsNullOrWhiteSpace(address.Street)
+            && !string.IsNullOrWhiteSpace(address.Number)
+            && !string.IsNullOrWhiteSpace(address.Neighborhood)
+            && !string.IsNullOrWhiteSpace(address.City)
+            && OnlyDigits(address.PostalCode).Length == 8
+            && address.State?.Trim().Length == 2;
 
     private static BankSlipGatewayException CreateValidationException(
         string errorCode,
