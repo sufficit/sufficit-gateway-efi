@@ -23,6 +23,8 @@ public class ServiceCollectionExtensionsTests
         var gateway = provider.GetRequiredService<EfiGateway>();
 
         Assert.Same(gateway, provider.GetRequiredService<IBankSlipGateway>());
+        Assert.Same(gateway, provider.GetRequiredService<IBankSlipProviderNotificationGateway>());
         Assert.Same(gateway, provider.GetRequiredService<IBankSlipProviderDiagnosticsGateway>());
+        Assert.Same(gateway, provider.GetRequiredService<IGatewayDiagnosticsGateway>());
     }
 }

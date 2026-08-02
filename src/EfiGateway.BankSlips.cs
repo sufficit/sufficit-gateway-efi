@@ -469,7 +469,10 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
         var chargeId = GetScalarString(data, "charge_id") ?? fallbackChargeId;
         var providerStatus = FindString(data, "status") ?? "waiting";
         var barCode = FindString(data, "barcode", "bar_code", "line");
-        var urlValue = FindString(data, "link", "charge", "url");
+        var htmlUrl = CreateHttpsUri(
+            FindString(data, "link")
+                ?? FindString(data, "billet_link"));
+        var pdfUrl = CreateHttpsUri(FindPdfChargeUrl(data));
 
         return new ProviderBankSlipResult
         {
@@ -478,8 +481,59 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
             ProviderStatus = providerStatus,
             Status = MapStatus(providerStatus),
             BarCode = barCode,
-            Url = Uri.TryCreate(urlValue, UriKind.Absolute, out var url) ? url : null
+            HtmlUrl = htmlUrl,
+            PdfUrl = pdfUrl,
+            Url = pdfUrl ?? htmlUrl
         };
+    }
+
+    private static Uri? CreateHttpsUri(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttps
+            && string.IsNullOrEmpty(uri.UserInfo)
+                ? uri
+                : null;
+
+    /// <summary>
+    /// Finds the direct PDF URL without mistaking an unrelated charge property
+    /// for a document. Efí returns <c>data.pdf.charge</c> when issuing a boleto
+    /// and <c>data.payment.banking_billet.pdf.charge</c> when querying it.
+    /// </summary>
+    private static string? FindPdfChargeUrl(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            if (element.TryGetProperty("pdf", out var pdf))
+            {
+                var charge = GetScalarString(pdf, "charge");
+                if (!string.IsNullOrWhiteSpace(charge))
+                {
+                    return charge;
+                }
+            }
+
+            foreach (var property in element.EnumerateObject())
+            {
+                var nested = FindPdfChargeUrl(property.Value);
+                if (!string.IsNullOrWhiteSpace(nested))
+                {
+                    return nested;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var nested = FindPdfChargeUrl(item);
+                if (!string.IsNullOrWhiteSpace(nested))
+                {
+                    return nested;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static BankSlipStatus MapStatus(string providerStatus)
@@ -487,11 +541,15 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
         {
             "new" => BankSlipStatus.Processing,
             "waiting" => BankSlipStatus.Ready,
+            "identified" => BankSlipStatus.Ready,
+            "approved" => BankSlipStatus.Ready,
             "unpaid" => BankSlipStatus.Ready,
             "expired" => BankSlipStatus.Ready,
             "paid" => BankSlipStatus.Paid,
             "settled" => BankSlipStatus.Paid,
             "canceled" => BankSlipStatus.Canceled,
+            "refunded" => BankSlipStatus.ReconciliationPending,
+            "contested" => BankSlipStatus.ReconciliationPending,
             _ => BankSlipStatus.ReconciliationPending
         };
 

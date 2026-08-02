@@ -14,7 +14,7 @@ public class EfiGatewayBankSlipTests
         handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
         handler.EnqueueJson("""{"code":200,"data":{"charge_id":12345,"status":"new"}}""");
         handler.EnqueueJson(
-            """{"code":200,"data":{"charge_id":12345,"status":"waiting","barcode":"0019000009","link":"https://sandbox.efi.example/billet/12345"}}""");
+            """{"code":200,"data":{"charge_id":12345,"status":"waiting","barcode":"0019000009","link":"https://sandbox.efi.example/billet/12345","pdf":{"charge":"https://sandbox.efi.example/billet/12345.pdf"}}}""");
         var gateway = GatewayTestFactory.CreateEfi(handler);
         var request = CreateIssueRequest();
 
@@ -23,6 +23,9 @@ public class EfiGatewayBankSlipTests
         Assert.Equal(BankSlipStatus.Ready, result.Status);
         Assert.Equal("12345", result.ChargeId);
         Assert.Equal("0019000009", result.BarCode);
+        Assert.Equal("https://sandbox.efi.example/billet/12345", result.HtmlUrl?.AbsoluteUri);
+        Assert.Equal("https://sandbox.efi.example/billet/12345.pdf", result.PdfUrl?.AbsoluteUri);
+        Assert.Equal("https://sandbox.efi.example/billet/12345.pdf", result.Url?.AbsoluteUri);
         Assert.Equal(3, handler.Requests.Count);
         Assert.Equal("https://cobrancas-h.api.efipay.com.br/v1/authorize", handler.Requests[0].Uri.AbsoluteUri);
         Assert.Equal("https://cobrancas-h.api.efipay.com.br/v1/charge", handler.Requests[1].Uri.AbsoluteUri);
@@ -31,6 +34,67 @@ public class EfiGatewayBankSlipTests
         Assert.Contains("\"juridical_person\"", handler.Requests[2].Body);
         Assert.StartsWith("Basic ", handler.Requests[0].Headers["Authorization"].Single());
         Assert.Equal("Bearer token-123", handler.Requests[1].Headers["Authorization"].Single());
+    }
+
+    [Fact]
+    public async Task GetAsyncPrefersNestedPdfChargeFromEfiQueryResponse()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson(
+            """
+            {
+              "code": 200,
+              "data": {
+                "charge_id": 12345,
+                "status": "waiting",
+                "payment": {
+                  "banking_billet": {
+                    "barcode": "0019000009",
+                    "link": "https://sandbox.efi.example/billet/12345",
+                    "billet_link": "https://sandbox.efi.example/view/12345",
+                    "pdf": {
+                      "charge": "https://sandbox.efi.example/billet/12345.pdf"
+                    }
+                  }
+                }
+              }
+            }
+            """);
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetAsync(
+            "12345",
+            CreateContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(BankSlipStatus.Ready, result.Status);
+        Assert.Equal("0019000009", result.BarCode);
+        Assert.Equal("https://sandbox.efi.example/billet/12345", result.HtmlUrl?.AbsoluteUri);
+        Assert.Equal("https://sandbox.efi.example/billet/12345.pdf", result.PdfUrl?.AbsoluteUri);
+        Assert.Equal("https://sandbox.efi.example/billet/12345.pdf", result.Url?.AbsoluteUri);
+        Assert.Equal(HttpMethod.Get, handler.Requests[1].Method);
+    }
+
+    [Fact]
+    public async Task GetAsyncFallsBackToBilletLinkWhenPdfIsUnavailable()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson(
+            """{"code":200,"data":{"charge_id":12345,"status":"waiting","billet_link":"https://sandbox.efi.example/view/12345"}}""");
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetAsync(
+            "12345",
+            CreateContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Null(result.PdfUrl);
+        Assert.Equal("https://sandbox.efi.example/view/12345", result.HtmlUrl?.AbsoluteUri);
+        Assert.Equal("https://sandbox.efi.example/view/12345", result.Url?.AbsoluteUri);
     }
 
     [Fact]
@@ -290,6 +354,50 @@ public class EfiGatewayBankSlipTests
         Assert.True(result.Payload.GetProperty("authenticated").GetBoolean());
         Assert.DoesNotContain("token-123", result.Payload.GetRawText(), StringComparison.Ordinal);
         Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task GetNotificationAsyncExpandsTokenIntoOrderedProviderEvents()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600}""");
+        handler.EnqueueJson(
+            """
+            {
+              "code": 200,
+              "data": [
+                {
+                  "id": 17,
+                  "type": "charge",
+                  "custom_id": "8c732677a5ea4f33a8e13dfcdb538411",
+                  "status": { "current": "paid", "previous": "waiting" },
+                  "identifiers": { "charge_id": 12345 },
+                  "created_at": "2026-08-01T21:30:00Z",
+                  "received_by_bank_at": "2026-08-01T21:29:00Z",
+                  "value": 50000
+                }
+              ]
+            }
+            """);
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetNotificationAsync(
+            "opaque/token+value",
+            CreateContext(),
+            CancellationToken.None);
+
+        var providerEvent = Assert.Single(result.Events);
+        Assert.Equal(BankSlipProviderCodes.Efi, result.ProviderCode);
+        Assert.Equal("17", providerEvent.EventId);
+        Assert.Equal("12345", providerEvent.ChargeId);
+        Assert.Equal("charge", providerEvent.EventType);
+        Assert.Equal("paid", providerEvent.ProviderStatus);
+        Assert.Equal(BankSlipStatus.Paid, providerEvent.Status);
+        Assert.Equal(500m, providerEvent.Value);
+        Assert.Equal(
+            "https://cobrancas-h.api.efipay.com.br/v1/notification/opaque%2Ftoken%2Bvalue",
+            handler.Requests[1].Uri.AbsoluteUri);
+        Assert.DoesNotContain("token-123", providerEvent.Payload, StringComparison.Ordinal);
     }
 
     private static BankSlipGatewayIssueRequest CreateIssueRequest()
