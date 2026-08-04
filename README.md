@@ -53,12 +53,19 @@ configuração geral do Efí pertence ao módulo de boletos:
         "BillingProductionBaseAddress": "https://cobrancas.api.efipay.com.br/",
         "Timeout": "00:00:30",
         "TokenClockSkew": "00:00:30",
+        "IncludePayerEmail": false,
+        "_IncludePayerEmail": "Quando true, envia o e-mail do pagador à Efí. A Efí poderá disparar mensagens de cobrança diretamente; mantenha false quando a comunicação for feita pela Sufficit.",
         "Credentials": {}
       }
     }
   }
 }
 ```
+
+`IncludePayerEmail` é um opt-in. Quando a requisição de emissão informa essa
+decisão explicitamente, ela prevalece sobre o padrão do gateway. No fluxo V2,
+o valor vem das configurações Efí do tenant e nasce desligado. O campo `_IncludePayerEmail`
+é apenas documentação inline do arquivo JSON e é ignorado pelo binder.
 
 Client ID e Client Secret não pertencem a este repositório nem ao payload das
 filas. O host resolve referências opacas por `IGatewayCredentialResolver` a

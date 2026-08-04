@@ -196,7 +196,9 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
         BankSlipGatewayContext context,
         CancellationToken cancellationToken)
     {
-        var payer = CreatePayerPayload(request.Payer);
+        var includePayerEmail = request.IncludePayerEmail
+            ?? _options.CurrentValue.IncludePayerEmail;
+        var payer = CreatePayerPayload(request.Payer, includePayerEmail);
         var bankingBillet = new Dictionary<string, object?>
         {
             ["customer"] = payer,
@@ -422,15 +424,23 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
             Content = JsonContent.Create(payload, options: JsonOptions)
         };
 
-    private static Dictionary<string, object?> CreatePayerPayload(BankSlipPayerSnapshot payer)
+    private static Dictionary<string, object?> CreatePayerPayload(
+        BankSlipPayerSnapshot payer,
+        bool includePayerEmail)
     {
         var document = OnlyDigits(payer.Document);
         var customer = new Dictionary<string, object?>
         {
             ["name"] = payer.Name,
-            ["email"] = payer.Email,
             ["phone_number"] = NormalizeBrazilianPhone(OnlyDigits(payer.Phone))
         };
+
+        // Efí may send its own collection messages whenever this field is present.
+        // Keep it opt-in: Sufficit normally owns customer communication.
+        if (includePayerEmail && !string.IsNullOrWhiteSpace(payer.Email))
+        {
+            customer["email"] = payer.Email.Trim();
+        }
 
         if (document.Length == 14)
         {

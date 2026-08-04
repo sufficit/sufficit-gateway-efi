@@ -32,8 +32,72 @@ public class EfiGatewayBankSlipTests
         Assert.Equal("https://cobrancas-h.api.efipay.com.br/v1/charge/12345/pay", handler.Requests[2].Uri.AbsoluteUri);
         Assert.Contains("\"custom_id\":\"8c732677a5ea4f33a8e13dfcdb538411\"", handler.Requests[1].Body);
         Assert.Contains("\"juridical_person\"", handler.Requests[2].Body);
+        Assert.DoesNotContain("\"email\":", handler.Requests[2].Body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("financeiro@example.test", request.Payer.Email);
         Assert.StartsWith("Basic ", handler.Requests[0].Headers["Authorization"].Single());
         Assert.Equal("Bearer token-123", handler.Requests[1].Headers["Authorization"].Single());
+    }
+
+    [Fact]
+    public async Task CreateAsyncIncludesPayerEmailOnlyWhenExplicitlyEnabled()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""{"code":200,"data":{"charge_id":12345,"status":"new"}}""");
+        handler.EnqueueJson(
+            """{"code":200,"data":{"charge_id":12345,"status":"waiting","barcode":"0019000009"}}""");
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+        var request = CreateIssueRequest();
+        request.IncludePayerEmail = true;
+
+        await gateway.CreateAsync(request, CreateContext(), CancellationToken.None);
+
+        Assert.Contains(
+            "\"email\":\"financeiro@example.test\"",
+            handler.Requests[2].Body,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CreateAsyncUsesGatewayPayerEmailDefaultWhenCallerDoesNotDecide()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""{"code":200,"data":{"charge_id":12345,"status":"new"}}""");
+        handler.EnqueueJson(
+            """{"code":200,"data":{"charge_id":12345,"status":"waiting","barcode":"0019000009"}}""");
+        var gateway = GatewayTestFactory.CreateEfi(
+            handler,
+            options => options.IncludePayerEmail = true);
+
+        await gateway.CreateAsync(CreateIssueRequest(), CreateContext(), CancellationToken.None);
+
+        Assert.Contains(
+            "\"email\":\"financeiro@example.test\"",
+            handler.Requests[2].Body,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CreateAsyncExplicitOptOutOverridesGatewayPayerEmailDefault()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""{"code":200,"data":{"charge_id":12345,"status":"new"}}""");
+        handler.EnqueueJson(
+            """{"code":200,"data":{"charge_id":12345,"status":"waiting","barcode":"0019000009"}}""");
+        var gateway = GatewayTestFactory.CreateEfi(
+            handler,
+            options => options.IncludePayerEmail = true);
+        var request = CreateIssueRequest();
+        request.IncludePayerEmail = false;
+
+        await gateway.CreateAsync(request, CreateContext(), CancellationToken.None);
+
+        Assert.DoesNotContain(
+            "\"email\":",
+            handler.Requests[2].Body,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
