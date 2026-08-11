@@ -1,0 +1,35 @@
+name: Publish Packages
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      NUPKGS_DIR: ${{ github.workspace }}/src/nupkgs
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: |
+          9.0.x
+          10.0.x
+
+    - name: Restore
+      run: dotnet restore tests/Sufficit.Gateway.Efi.Tests.csproj
+
+    - name: Test
+      run: dotnet test tests/Sufficit.Gateway.Efi.Tests.csproj --configuration Release --no-restore
+
+    - name: Pack
+      run: dotnet pack src/Sufficit.Gateway.Efi.csproj --configuration Packing --output ${{ env.NUPKGS_DIR }}
+
+    - name: Publish to NuGet.org
+      run: dotnet nuget push --skip-duplicate ${{ env.NUPKGS_DIR }}/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }}
