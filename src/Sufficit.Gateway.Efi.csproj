@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>Sufficit.Gateway.Efi</RootNamespace>
+    <AssemblyName>Sufficit.Gateway.Efi</AssemblyName>
+    <Configurations>Debug;Release;Packing</Configurations>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Sufficit Versioning">
+    <VersionSuffix Condition="'$(Configuration)' != 'Debug'">1.$([System.DateTime]::UtcNow.ToString(yy)).$([System.DateTime]::UtcNow.ToString(MMdd)).$([System.DateTime]::UtcNow.ToString(HHmm))</VersionSuffix>
+    <AssemblyVersion Condition="'$(VersionSuffix)' == ''">1.99.0.0</AssemblyVersion>
+    <AssemblyVersion Condition="'$(VersionSuffix)' != ''">$(VersionSuffix)</AssemblyVersion>
+    <Version Condition="'$(VersionSuffix)' == ''">1.99.0.0</Version>
+    <Version Condition="'$(VersionSuffix)' != ''">$(VersionSuffix)</Version>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Sufficit Package">
+    <Company>SUFFICIT SOLUÇÕES EM TECNOLOGIA DA INFORMAÇÃO</Company>
+    <Authors>Hugo Castro de Deco</Authors>
+    <ProductName>Sufficit Gateway Efí</ProductName>
+    <PackageId>Sufficit.Gateway.Efi</PackageId>
+    <PackageDescription>Typed Sufficit integration with the Efí APIs.</PackageDescription>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/sufficit/sufficit-gateway-efi</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/sufficit/sufficit-gateway-efi</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup Label="Sufficit Pack Items">
+    <None Include="../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PkgVersion>9.0.19</PkgVersion>
+  </PropertyGroup>
+
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<PkgVersion>10.0.11</PkgVersion>
+	</PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="$(PkgVersion)" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(PkgVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="$(PkgVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(PkgVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(PkgVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\sufficit-base\src\Sufficit.Base.csproj" Condition="Exists('..\..\sufficit-base\src\Sufficit.Base.csproj')" />
+    <PackageReference Include="Sufficit.Base" Version="1.*" Condition="!Exists('..\..\sufficit-base\src\Sufficit.Base.csproj')" />
+  </ItemGroup>
+</Project>
