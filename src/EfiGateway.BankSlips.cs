@@ -492,15 +492,50 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
         {
             ProviderCode = BankSlipProviderCodes.Efi,
             ChargeId = chargeId,
+            CustomId = GetScalarString(data, "custom_id"),
             ProviderStatus = providerStatus,
             Status = MapStatus(providerStatus),
-            SettledValue = ReadCents(payment, "paid_value"),
-            PaidAtUtc = ReadEfiDateTimeUtc(payment, "paid_at"),
+            // The inventory endpoint nests settlement evidence under payment,
+            // while GET /v1/charge/:id returns paid_value at data root and the
+            // paid transition timestamp in history. Accept both documented
+            // representations because this parser handles charge creation and
+            // charge detail responses.
+            SettledValue = ReadCents(data, "paid_value")
+                ?? ReadCents(payment, "paid_value"),
+            PaidAtUtc = ReadEfiDateTimeUtc(payment, "paid_at")
+                ?? ReadPaidHistoryDateUtc(data, providerStatus),
             BarCode = barCode,
             HtmlUrl = htmlUrl,
             PdfUrl = pdfUrl,
             Url = pdfUrl ?? htmlUrl
         };
+    }
+
+    private static DateTime? ReadPaidHistoryDateUtc(
+        JsonElement data,
+        string providerStatus)
+    {
+        if (!string.Equals(providerStatus, "paid", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(providerStatus, "settled", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        if (data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("history", out var history)
+            || history.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        DateTime? latest = null;
+        foreach (var entry in history.EnumerateArray())
+        {
+            var candidate = ReadEfiDateTimeUtc(entry, "created_at");
+            if (candidate.HasValue && (!latest.HasValue || candidate.Value > latest.Value))
+                latest = candidate;
+        }
+
+        return latest;
     }
 
     private static Uri? CreateHttpsUri(string? value)

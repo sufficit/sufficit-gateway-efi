@@ -194,6 +194,46 @@ public class EfiGatewayBankSlipTests
     }
 
     [Fact]
+    public async Task GetAsyncReadsSettlementEvidenceFromProductionChargeDetailShape()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson(
+            """
+            {
+              "code": 200,
+              "data": {
+                "charge_id": 1050609626,
+                "custom_id": "8c732677a5ea4f33a8e13dfcdb538411",
+                "status": "paid",
+                "paid_value": 11900,
+                "payment": {
+                  "created_at": "2026-08-17 15:57:43",
+                  "method": "banking_billet"
+                },
+                "history": [
+                  { "message": "Cobrança criada", "created_at": "2026-08-17 15:57:42" },
+                  { "message": "Pagamento via boleto aguardando confirmação", "created_at": "2026-08-17 15:57:43" },
+                  { "message": "Pagamento efetuado", "created_at": "2026-08-17 17:58:23" }
+                ]
+              }
+            }
+            """);
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetAsync(
+            "1050609626",
+            CreateContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(BankSlipStatus.Paid, result.Status);
+        Assert.Equal(119m, result.SettledValue);
+        Assert.Equal("8c732677a5ea4f33a8e13dfcdb538411", result.CustomId);
+        Assert.Equal(new DateTime(2026, 8, 17, 20, 58, 23, DateTimeKind.Utc), result.PaidAtUtc);
+    }
+
+    [Fact]
     public async Task CancelAsyncUsesOriginalEfiCharge()
     {
         var handler = new RecordingHttpMessageHandler();
