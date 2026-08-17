@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Sufficit.Finance;
 using System.Globalization;
 using System.Net;
@@ -29,38 +30,79 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
 
         var maximumItems = Math.Clamp(request.MaximumItems, 1, InventoryMaximumItems);
         var items = new List<ProviderBankSlipInventoryItem>(Math.Min(maximumItems, InventoryPageSize));
+        var seenChargeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var requestCount = 0;
         var truncated = false;
+        var partial = false;
+        string? warningCode = null;
+        string? warningMessage = null;
 
-        for (var offset = 0; offset < maximumItems; offset += InventoryPageSize)
+        for (var pageIndex = 0; pageIndex * InventoryPageSize < maximumItems; pageIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var limit = Math.Min(InventoryPageSize, maximumItems - offset);
-            var path = BuildInventoryPath(fromDate, toDate, limit, offset);
-            using var response = await SendAuthorizedAsync(
-                () => new HttpRequestMessage(HttpMethod.Get, BuildUri(context, path)),
-                context,
-                BankSlipOperation.Query,
-                null,
-                cancellationToken).ConfigureAwait(false);
-            requestCount++;
-            if (response.StatusCode == HttpStatusCode.NotFound)
-                break;
-
-            await EnsureSuccessAsync(
-                response,
-                BankSlipOperation.Query,
-                null,
-                cancellationToken).ConfigureAwait(false);
-            using var document = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
-            var page = ParseInventoryPage(document.RootElement);
-            items.AddRange(page);
-            if (page.Count < limit)
-                break;
-
-            if (items.Count >= maximumItems)
+            var pageNumber = pageIndex + 1;
+            var limit = Math.Min(InventoryPageSize, maximumItems - items.Count);
+            var path = BuildInventoryPath(fromDate, toDate, limit, pageNumber);
+            try
             {
-                truncated = true;
+                requestCount++;
+                using var response = await SendAuthorizedAsync(
+                    () => new HttpRequestMessage(HttpMethod.Get, BuildUri(context, path)),
+                    context,
+                    BankSlipOperation.Query,
+                    null,
+                    cancellationToken).ConfigureAwait(false);
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                    break;
+
+                await EnsureSuccessAsync(
+                    response,
+                    BankSlipOperation.Query,
+                    null,
+                    cancellationToken).ConfigureAwait(false);
+                using var document = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
+                var page = ParseInventoryPage(document.RootElement);
+                var novelItems = page
+                    .Where(item => seenChargeIds.Add(item.ChargeId))
+                    .ToArray();
+
+                if (page.Count > 0 && novelItems.Length == 0)
+                {
+                    partial = true;
+                    warningCode = "repeated_page";
+                    warningMessage = "A EFI repetiu uma página já processada. A consulta foi interrompida para evitar chamadas duplicadas; os itens anteriores foram preservados.";
+                    _logger.LogWarning(
+                        "EFI inventory page {PageNumber} repeated previously loaded charge identifiers; returning {ItemCount} partial items after {RequestCount} requests.",
+                        pageNumber,
+                        items.Count,
+                        requestCount);
+                    break;
+                }
+
+                items.AddRange(novelItems);
+                if (page.Count < limit)
+                    break;
+
+                if (items.Count >= maximumItems)
+                {
+                    truncated = true;
+                    break;
+                }
+            }
+            catch (Exception exception) when (
+                items.Count > 0
+                && !cancellationToken.IsCancellationRequested
+                && IsRecoverableInventoryFailure(exception))
+            {
+                partial = true;
+                warningCode = GetInventoryWarningCode(exception);
+                warningMessage = GetInventoryWarningMessage(exception);
+                _logger.LogWarning(
+                    exception,
+                    "EFI inventory page {PageNumber} failed; returning {ItemCount} partial items after {RequestCount} requests.",
+                    pageNumber,
+                    items.Count,
+                    requestCount);
                 break;
             }
         }
@@ -69,7 +111,10 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
         {
             Items = items,
             RequestCount = requestCount,
-            Truncated = truncated
+            Truncated = truncated,
+            Partial = partial,
+            WarningCode = warningCode,
+            WarningMessage = warningMessage
         };
     }
 
@@ -77,17 +122,46 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
         DateTime fromDate,
         DateTime toDate,
         int limit,
-        int offset)
+        int page)
         => string.Format(
             CultureInfo.InvariantCulture,
             // The list endpoint uses charge categories (billet, card, carnet,
             // subscription). `banking_billet` is the nested payment method and
             // is rejected when used as the charge_type query parameter.
-            "v1/charges?charge_type=billet&begin_date={0:yyyy-MM-dd}&end_date={1:yyyy-MM-dd}&limit={2}&offset={3}",
+            // EFI reports `offset` but does not use it to advance this endpoint:
+            // pagination is page-based. Keeping this explicit also prevents the
+            // first page from being requested repeatedly until client timeout.
+            "v1/charges?charge_type=billet&begin_date={0:yyyy-MM-dd}&end_date={1:yyyy-MM-dd}&limit={2}&page={3}",
             fromDate,
             toDate,
             limit,
-            offset);
+            page);
+
+    private static bool IsRecoverableInventoryFailure(Exception exception)
+        => exception is BankSlipGatewayException
+            || exception is HttpRequestException
+            || exception is TaskCanceledException
+            || exception is System.Text.Json.JsonException;
+
+    private static string GetInventoryWarningCode(Exception exception)
+        => exception switch
+        {
+            BankSlipGatewayException gatewayException
+                when !string.IsNullOrWhiteSpace(gatewayException.ErrorCode)
+                => gatewayException.ErrorCode,
+            TaskCanceledException => "provider_timeout",
+            System.Text.Json.JsonException => "invalid_provider_response",
+            _ => "provider_transport_failure"
+        };
+
+    private static string GetInventoryWarningMessage(Exception exception)
+        => exception switch
+        {
+            BankSlipGatewayException gatewayException => gatewayException.Message,
+            TaskCanceledException => "A EFI excedeu o tempo de resposta em uma página posterior. Os itens carregados antes do limite foram preservados.",
+            System.Text.Json.JsonException => "A EFI devolveu uma página em formato inválido. Os itens carregados anteriormente foram preservados.",
+            _ => "A comunicação com a EFI falhou em uma página posterior. Os itens carregados anteriormente foram preservados."
+        };
 
     private static IReadOnlyList<ProviderBankSlipInventoryItem> ParseInventoryPage(JsonElement root)
     {
