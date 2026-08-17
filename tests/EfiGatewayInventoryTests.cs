@@ -53,7 +53,7 @@ public sealed class EfiGatewayInventoryTests
         Assert.Equal(1, result.RequestCount);
         Assert.False(result.Truncated);
         Assert.Equal(
-            "https://cobrancas-h.api.efipay.com.br/v1/charges?charge_type=banking_billet&begin_date=2026-08-10&end_date=2026-08-16&limit=100&offset=0",
+            "https://cobrancas-h.api.efipay.com.br/v1/charges?charge_type=billet&begin_date=2026-08-10&end_date=2026-08-16&limit=100&offset=0",
             handler.Requests[1].Uri.AbsoluteUri);
     }
 

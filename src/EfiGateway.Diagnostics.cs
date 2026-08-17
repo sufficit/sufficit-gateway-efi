@@ -82,8 +82,8 @@ public sealed partial class EfiGateway : IGatewayDiagnosticsGateway
         var relativePath = operation.Code switch
         {
             "charges.get" => $"v1/charge/{Uri.EscapeDataString(resourceId!)}",
-            "charges.list-boleto" => BuildChargeListPath("banking_billet"),
-            "charges.list-card" => BuildChargeListPath("credit_card"),
+            "charges.list-boleto" => BuildChargeListPath("billet"),
+            "charges.list-card" => BuildChargeListPath("card"),
             "notifications.get" => $"v1/notification/{Uri.EscapeDataString(resourceId!)}",
             _ => throw new InvalidOperationException("The requested Efí gateway operation is not mapped.")
         };

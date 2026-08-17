@@ -34,6 +34,37 @@ public sealed class EfiGatewayDiagnosticsTests
             item.Code == "pix.transactions" && !item.Available);
     }
 
+    [Theory]
+    [InlineData("charges.list-boleto", "billet")]
+    [InlineData("charges.list-card", "card")]
+    public async Task ChargeListsUseEfiChargeCategoryEnums(
+        string operationCode,
+        string chargeType)
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""{"code":200,"data":[]}""");
+        IGatewayDiagnosticsGateway gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.ExecuteDiagnosticAsync(
+            new GatewayDiagnosticRequest
+            {
+                Provider = "efi",
+                OperationCode = operationCode,
+                Limit = 20
+            },
+            CreateContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(200, result.HttpStatusCode);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Contains(
+            $"/v1/charges?charge_type={chargeType}&",
+            handler.Requests[1].Uri.PathAndQuery,
+            StringComparison.Ordinal);
+    }
+
     private static GatewayCallContext CreateContext()
         => new()
         {

@@ -80,7 +80,10 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
         int offset)
         => string.Format(
             CultureInfo.InvariantCulture,
-            "v1/charges?charge_type=banking_billet&begin_date={0:yyyy-MM-dd}&end_date={1:yyyy-MM-dd}&limit={2}&offset={3}",
+            // The list endpoint uses charge categories (billet, card, carnet,
+            // subscription). `banking_billet` is the nested payment method and
+            // is rejected when used as the charge_type query parameter.
+            "v1/charges?charge_type=billet&begin_date={0:yyyy-MM-dd}&end_date={1:yyyy-MM-dd}&limit={2}&offset={3}",
             fromDate,
             toDate,
             limit,
