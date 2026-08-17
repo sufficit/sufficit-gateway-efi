@@ -483,6 +483,10 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
             FindString(data, "link")
                 ?? FindString(data, "billet_link"));
         var pdfUrl = CreateHttpsUri(FindPdfChargeUrl(data));
+        var payment = data.ValueKind == JsonValueKind.Object
+            && data.TryGetProperty("payment", out var paymentElement)
+                ? paymentElement
+                : default;
 
         return new ProviderBankSlipResult
         {
@@ -490,6 +494,8 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
             ChargeId = chargeId,
             ProviderStatus = providerStatus,
             Status = MapStatus(providerStatus),
+            SettledValue = ReadCents(payment, "paid_value"),
+            PaidAtUtc = ReadEfiDateTimeUtc(payment, "paid_at"),
             BarCode = barCode,
             HtmlUrl = htmlUrl,
             PdfUrl = pdfUrl,

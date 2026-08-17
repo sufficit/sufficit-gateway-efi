@@ -162,6 +162,38 @@ public class EfiGatewayBankSlipTests
     }
 
     [Fact]
+    public async Task GetAsyncReturnsSettlementEvidenceForPaidCharge()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson(
+            """
+            {
+              "code": 200,
+              "data": {
+                "charge_id": 12345,
+                "status": "paid",
+                "payment": {
+                  "paid_at": "2026-08-17T15:40:00.000Z",
+                  "paid_value": 11900
+                }
+              }
+            }
+            """);
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetAsync(
+            "12345",
+            CreateContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(BankSlipStatus.Paid, result.Status);
+        Assert.Equal(119m, result.SettledValue);
+        Assert.Equal(new DateTime(2026, 8, 17, 15, 40, 0, DateTimeKind.Utc), result.PaidAtUtc);
+    }
+
+    [Fact]
     public async Task CancelAsyncUsesOriginalEfiCharge()
     {
         var handler = new RecordingHttpMessageHandler();
