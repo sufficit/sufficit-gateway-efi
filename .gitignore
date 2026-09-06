@@ -10,3 +10,5 @@ coverage/
 *.suo
 *.nupkg
 *.token
+# Worktrees (padrao): arvores de trabalho em <repo>/.worktrees/
+**/.worktrees/

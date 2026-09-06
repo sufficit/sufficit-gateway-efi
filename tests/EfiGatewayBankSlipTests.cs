@@ -194,7 +194,7 @@ public class EfiGatewayBankSlipTests
     }
 
     [Fact]
-    public async Task GetAsyncReadsSettlementEvidenceFromProductionChargeDetailShape()
+    public async Task GetAsyncDoesNotUseHistoryAsPaymentDate()
     {
         var handler = new RecordingHttpMessageHandler();
         handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
@@ -230,7 +230,7 @@ public class EfiGatewayBankSlipTests
         Assert.Equal(BankSlipStatus.Paid, result.Status);
         Assert.Equal(119m, result.SettledValue);
         Assert.Equal("8c732677a5ea4f33a8e13dfcdb538411", result.CustomId);
-        Assert.Equal(new DateTime(2026, 8, 17, 20, 58, 23, DateTimeKind.Utc), result.PaidAtUtc);
+        Assert.Null(result.PaidAtUtc);
     }
 
     [Fact]

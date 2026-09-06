@@ -52,6 +52,7 @@ public sealed class EfiGatewayInventoryTests
         Assert.Equal(50m, item.Value);
         Assert.Equal(50m, item.PaidValue);
         Assert.Equal(new DateTime(2026, 8, 10, 23, 23, 31, DateTimeKind.Utc), item.CreatedAtUtc);
+        Assert.Equal(new DateTime(2026, 8, 11, 10, 0, 0, DateTimeKind.Utc), item.PaidAtUtc);
         Assert.Equal(1, result.RequestCount);
         Assert.False(result.Truncated);
         Assert.Equal(
@@ -79,6 +80,108 @@ public sealed class EfiGatewayInventoryTests
         Assert.Contains("limit=100&page=1", handler.Requests[1].Uri.Query);
         Assert.Contains("limit=100&page=2", handler.Requests[2].Uri.Query);
         Assert.DoesNotContain("offset=", handler.Requests[2].Uri.Query);
+    }
+
+    [Fact]
+    public async Task InventoryLeavesPaymentDateEmptyWhenOnlyReceivedByBankAtIsPresent()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""
+            {
+              "code": 200,
+              "data": [
+                {
+                  "id": 711008223,
+                  "total": 5000,
+                  "status": "paid",
+                  "created_at": "2026-08-10 20:23:31",
+                  "payment": {
+                    "received_by_bank_at": "2026-08-11 10:00:00",
+                    "paid_value": 5000
+                  }
+                }
+              ]
+            }
+            """);
+        handler.EnqueueJson("""
+            {
+              "code": 200,
+              "data": {
+                "charge_id": 711008223,
+                "status": "paid",
+                "payment": {
+                  "received_by_bank_at": "2026-08-11 10:00:00",
+                  "paid_value": 5000
+                },
+                "history": [
+                  { "message": "Pagamento efetuado", "created_at": "2026-08-11 12:00:00" }
+                ]
+              }
+            }
+            """);
+        IBankSlipProviderInventoryGateway gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetInventoryAsync(
+            InventoryRequest(),
+            InventoryContext(),
+            CancellationToken.None);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(BankSlipStatus.Paid, item.Status);
+        Assert.Null(item.PaidAtUtc);
+        Assert.Equal(2, result.RequestCount);
+        Assert.True(result.Partial);
+        Assert.Equal("payment_detail_unavailable", result.WarningCode);
+    }
+
+    [Fact]
+    public async Task InventoryReadsPaymentDateFromDetailPaidAtWhenListOmitsIt()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""
+            {
+              "code": 200,
+              "data": [
+                {
+                  "id": 711008224,
+                  "total": 5000,
+                  "status": "paid",
+                  "created_at": "2026-08-17 15:57:42",
+                  "payment": { "method": "banking_billet", "paid_value": 5000 }
+                }
+              ]
+            }
+            """);
+        handler.EnqueueJson("""
+            {
+              "code": 200,
+              "data": {
+                "charge_id": 711008224,
+                "status": "paid",
+                "payment": {
+                  "method": "banking_billet",
+                  "paid_at": "2026-08-17T20:58:23.000Z"
+                },
+                "history": [
+                  { "message": "Pagamento efetuado", "created_at": "2026-08-17 21:58:23" }
+                ]
+              }
+            }
+            """);
+        IBankSlipProviderInventoryGateway gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetInventoryAsync(
+            InventoryRequest(),
+            InventoryContext(),
+            CancellationToken.None);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(new DateTime(2026, 8, 17, 20, 58, 23, DateTimeKind.Utc), item.PaidAtUtc);
+        Assert.Equal(50m, item.PaidValue);
+        Assert.Equal(2, result.RequestCount);
+        Assert.False(result.Partial);
     }
 
     [Fact]

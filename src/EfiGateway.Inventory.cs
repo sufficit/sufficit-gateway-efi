@@ -107,6 +107,18 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
             }
         }
 
+        var paymentDetails = await EnrichMissingPaymentDatesAsync(
+            items,
+            context,
+            cancellationToken).ConfigureAwait(false);
+        requestCount += paymentDetails.RequestCount;
+        if (paymentDetails.Incomplete)
+        {
+            partial = true;
+            warningCode ??= "payment_detail_unavailable";
+            warningMessage ??= "A EFI não informou payment.paid_at na lista e uma ou mais consultas detalhadas não retornaram esse campo. Os itens carregados foram preservados.";
+        }
+
         return new ProviderBankSlipInventoryResult
         {
             Items = items,
@@ -117,6 +129,57 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
             WarningMessage = warningMessage
         };
     }
+
+    private async Task<(int RequestCount, bool Incomplete)> EnrichMissingPaymentDatesAsync(
+        IReadOnlyList<ProviderBankSlipInventoryItem> items,
+        BankSlipGatewayContext context,
+        CancellationToken cancellationToken)
+    {
+        var requestCount = 0;
+        var incomplete = false;
+        var candidates = items
+            .Where(item => IsPaidProviderStatus(item.ProviderStatus) && !item.PaidAtUtc.HasValue)
+            .ToArray();
+
+        foreach (var item in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            requestCount++;
+            try
+            {
+                var detail = await GetAsync(
+                    item.ChargeId,
+                    context,
+                    cancellationToken).ConfigureAwait(false);
+                if (detail == null || !detail.PaidAtUtc.HasValue)
+                {
+                    incomplete = true;
+                    _logger.LogWarning(
+                        "EFI charge {ChargeId} is paid but its detail response did not contain payment.paid_at.",
+                        item.ChargeId);
+                    continue;
+                }
+
+                item.PaidAtUtc = detail.PaidAtUtc;
+                item.PaidValue ??= detail.SettledValue;
+            }
+            catch (Exception exception) when (
+                !cancellationToken.IsCancellationRequested
+                && IsRecoverableInventoryFailure(exception))
+            {
+                incomplete = true;
+                _logger.LogWarning(
+                    exception,
+                    "Could not load EFI charge {ChargeId} detail while reading payment.paid_at.",
+                    item.ChargeId);
+            }
+        }
+
+        return (requestCount, incomplete);
+    }
+
+    private static bool IsPaidProviderStatus(string providerStatus)
+        => providerStatus.Trim().ToLowerInvariant() is "paid" or "settled";
 
     private static string BuildInventoryPath(
         DateTime fromDate,
@@ -190,8 +253,11 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
                 Status = MapStatus(providerStatus),
                 Value = ReadCents(item, "total") ?? 0m,
                 CreatedAtUtc = ReadEfiDateTimeUtc(item, "created_at"),
-                PaidAtUtc = ReadEfiDateTimeUtc(payment, "paid_at"),
+                // The reconciliation date is exclusively the provider's
+                // documented payment timestamp: payment.paid_at.
+                PaidAtUtc = ReadEfiPaymentDateUtc(payment),
                 PaidValue = ReadCents(payment, "paid_value")
+                    ?? ReadCents(item, "paid_value")
             });
         }
 
@@ -221,6 +287,9 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
 
         return null;
     }
+
+    private static DateTime? ReadEfiPaymentDateUtc(JsonElement element)
+        => ReadEfiDateTimeUtc(element, "paid_at");
 
     private static DateTime? ReadEfiDateTimeUtc(JsonElement element, string propertyName)
     {

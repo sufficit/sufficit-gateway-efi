@@ -496,46 +496,19 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
             ProviderStatus = providerStatus,
             Status = MapStatus(providerStatus),
             // The inventory endpoint nests settlement evidence under payment,
-            // while GET /v1/charge/:id returns paid_value at data root and the
-            // paid transition timestamp in history. Accept both documented
-            // representations because this parser handles charge creation and
-            // charge detail responses.
+            // while GET /v1/charge/:id returns paid_value at data root. Accept
+            // both documented value representations because this parser handles
+            // charge creation and charge detail responses.
             SettledValue = ReadCents(data, "paid_value")
                 ?? ReadCents(payment, "paid_value"),
-            PaidAtUtc = ReadEfiDateTimeUtc(payment, "paid_at")
-                ?? ReadPaidHistoryDateUtc(data, providerStatus),
+            // Do not substitute received_by_bank_at or history timestamps:
+            // payment.paid_at is the only payment date used by reconciliation.
+            PaidAtUtc = ReadEfiPaymentDateUtc(payment),
             BarCode = barCode,
             HtmlUrl = htmlUrl,
             PdfUrl = pdfUrl,
             Url = pdfUrl ?? htmlUrl
         };
-    }
-
-    private static DateTime? ReadPaidHistoryDateUtc(
-        JsonElement data,
-        string providerStatus)
-    {
-        if (!string.Equals(providerStatus, "paid", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(providerStatus, "settled", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-        if (data.ValueKind != JsonValueKind.Object
-            || !data.TryGetProperty("history", out var history)
-            || history.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
-
-        DateTime? latest = null;
-        foreach (var entry in history.EnumerateArray())
-        {
-            var candidate = ReadEfiDateTimeUtc(entry, "created_at");
-            if (candidate.HasValue && (!latest.HasValue || candidate.Value > latest.Value))
-                latest = candidate;
-        }
-
-        return latest;
     }
 
     private static Uri? CreateHttpsUri(string? value)
