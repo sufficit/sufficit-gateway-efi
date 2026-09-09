@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Sufficit.Gateway.Efi</RootNamespace>
     <AssemblyName>Sufficit.Gateway.Efi</AssemblyName>
     <Configurations>Debug;Release;Packing</Configurations>
@@ -35,9 +35,6 @@
     <None Include="../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0'">
-    <PkgVersion>9.0.20</PkgVersion>
-  </PropertyGroup>
 
 	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
 		<PkgVersion>10.0.12</PkgVersion>
