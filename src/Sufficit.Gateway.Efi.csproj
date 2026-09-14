@@ -49,7 +49,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\sufficit-base\src\Sufficit.Base.csproj" Condition="Exists('..\..\sufficit-base\src\Sufficit.Base.csproj')" />
-    <PackageReference Include="Sufficit.Base" Version="1.*" Condition="!Exists('..\..\sufficit-base\src\Sufficit.Base.csproj')" />
+    <ProjectReference Include="/mnt/sufficit/sufficit-base/.worktrees/context-purge-20260914182449/src/Sufficit.Base.csproj" Condition="Exists('/mnt/sufficit/sufficit-base/.worktrees/context-purge-20260914182449/src/Sufficit.Base.csproj')" />
+    <PackageReference Include="Sufficit.Base" Version="1.*" Condition="!Exists('/mnt/sufficit/sufficit-base/.worktrees/context-purge-20260914182449/src/Sufficit.Base.csproj')" />
   </ItemGroup>
 </Project>
