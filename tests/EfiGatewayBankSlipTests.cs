@@ -190,7 +190,8 @@ public class EfiGatewayBankSlipTests
         Assert.NotNull(result);
         Assert.Equal(BankSlipStatus.Paid, result.Status);
         Assert.Equal(119m, result.SettledValue);
-        Assert.Equal(new DateTime(2026, 8, 17, 15, 40, 0, DateTimeKind.Utc), result.PaidAtUtc);
+        Assert.Equal(new DateTime(2026, 8, 17, 15, 40, 0, DateTimeKind.Utc), result.PaymentConfirmedAtUtc);
+        Assert.Null(result.PaidAtUtc);
     }
 
     [Fact]
@@ -534,6 +535,65 @@ public class EfiGatewayBankSlipTests
             "https://cobrancas-h.api.efipay.com.br/v1/notification/opaque%2Ftoken%2Bvalue",
             handler.Requests[1].Uri.AbsoluteUri);
         Assert.DoesNotContain("token-123", providerEvent.Payload, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("2026-09-18", "2026-09-18T03:00:00Z", true)]
+    [InlineData("2026-09-18 10:15:30", "2026-09-18T13:15:30Z", false)]
+    [InlineData("2026-09-18T23:15:30-03:00", "2026-09-19T02:15:30Z", false)]
+    [InlineData("2026-09-18T00:00:00Z", "2026-09-18T00:00:00Z", false)]
+    [InlineData("2018-01-15", "2018-01-15T02:00:00Z", true)]
+    [InlineData("invalid", null, false)]
+    [InlineData(null, null, false)]
+    public async Task NotificationDatesUseBrazilianCalendarUnlessOffsetIsExplicit(
+        string? received, string? expectedUtc, bool dateOnly)
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            id = 18, type = "charge", status = new { current = "paid" },
+            identifiers = new { charge_id = 12345 },
+            created_at = "2026-09-21 07:03:41", received_by_bank_at = received, value = 5000
+        });
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"test-token","expires_in":600}""");
+        handler.EnqueueJson("{\"code\":200,\"data\":[" + payload + "]}");
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+        var batch = await gateway.GetNotificationAsync("notice", CreateContext(), CancellationToken.None);
+        var item = Assert.Single(batch.Events);
+        DateTime? expected = expectedUtc == null ? null : DateTime.Parse(expectedUtc, null,
+            System.Globalization.DateTimeStyles.AdjustToUniversal);
+        Assert.Equal(expected, item.PaidAtUtc);
+        Assert.Equal(new DateTime(2026, 9, 21, 10, 3, 41, DateTimeKind.Utc), item.EventAtUtc);
+        var evidence = gateway.ReadPaymentEvidence(payload);
+        if (expected.HasValue)
+        {
+            Assert.NotNull(evidence);
+            Assert.Equal(expected, evidence.ReceivedAtUtc);
+            Assert.Equal(dateOnly, evidence.IsDateOnly);
+        }
+        else Assert.Null(evidence);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("not json")]
+    [InlineData("{\"status\":{\"current\":\"waiting\"},\"received_by_bank_at\":\"2026-09-18\"}")]
+    public void InvalidOrNonPaymentNoticesDoNotCreatePaymentEvidence(string payload)
+        => Assert.Null(GatewayTestFactory.CreateEfi(new RecordingHttpMessageHandler()).ReadPaymentEvidence(payload));
+
+    [Fact]
+    public async Task DetailKeepsReceiptSeparateFromLaterConfirmation()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"test-token","expires_in":600}""");
+        handler.EnqueueJson("""
+            {"code":200,"data":{"charge_id":12345,"status":"paid","paid_value":5000,
+            "payment":{"received_by_bank_at":"2026-09-18","paid_at":"2026-09-21T10:01:52Z"}}}
+            """);
+        var result = await GatewayTestFactory.CreateEfi(handler).GetAsync("12345", CreateContext(), CancellationToken.None);
+        Assert.NotNull(result);
+        Assert.Equal(new DateTime(2026, 9, 18, 3, 0, 0, DateTimeKind.Utc), result.PaidAtUtc);
+        Assert.Equal(new DateTime(2026, 9, 21, 10, 1, 52, DateTimeKind.Utc), result.PaymentConfirmedAtUtc);
     }
 
     private static BankSlipGatewayIssueRequest CreateIssueRequest()

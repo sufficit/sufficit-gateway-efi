@@ -130,6 +130,7 @@ public sealed class EfiGatewayInventoryTests
         var item = Assert.Single(result.Items);
         Assert.Equal(BankSlipStatus.Paid, item.Status);
         Assert.Null(item.PaidAtUtc);
+        Assert.Equal(new DateTime(2026, 8, 11, 13, 0, 0, DateTimeKind.Utc), item.ReceivedByBankAtUtc);
         Assert.Equal(2, result.RequestCount);
         Assert.True(result.Partial);
         Assert.Equal("payment_detail_unavailable", result.WarningCode);

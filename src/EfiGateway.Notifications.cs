@@ -8,7 +8,7 @@ namespace Sufficit.Gateway.Efi;
 /// <summary>
 /// Expands opaque Efí callback tokens into provider-neutral status events.
 /// </summary>
-public sealed partial class EfiGateway : IBankSlipProviderNotificationGateway
+public sealed partial class EfiGateway : IBankSlipProviderNotificationGateway, IBankSlipPaymentEvidenceReader
 {
     public async Task<BankSlipProviderNotificationBatch> GetNotificationAsync(
         string notificationToken,
@@ -59,8 +59,8 @@ public sealed partial class EfiGateway : IBankSlipProviderNotificationGateway
                     Status = string.IsNullOrWhiteSpace(providerStatus)
                         ? null
                         : MapStatus(providerStatus),
-                    EventAtUtc = ParseProviderDateTime(GetScalarString(item, "created_at")),
-                    PaidAtUtc = ParseProviderDateTime(GetScalarString(item, "received_by_bank_at")),
+                    EventAtUtc = ReadEfiDateTimeUtc(item, "created_at"),
+                    PaidAtUtc = ReadEfiDateTimeUtc(item, "received_by_bank_at"),
                     Value = GetProviderValue(item),
                     Payload = item.GetRawText()
                 });
@@ -94,23 +94,30 @@ public sealed partial class EfiGateway : IBankSlipProviderNotificationGateway
                 ? GetScalarString(parent, propertyName)
                 : null;
 
-    private static DateTime? ParseProviderDateTime(string? value)
+    public BankSlipPaymentEvidence? ReadPaymentEvidence(string payload)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
+        if (string.IsNullOrWhiteSpace(payload))
             return null;
-        }
-
-        if (DateTimeOffset.TryParse(
-            value,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-            out var parsed))
+        try
         {
-            return parsed.UtcDateTime;
+            using var document = JsonDocument.Parse(payload);
+            var item = document.RootElement;
+            var status = GetNestedScalarString(item, "status", "current");
+            var chargeId = GetNestedScalarString(item, "identifiers", "charge_id");
+            var receivedAt = ReadEfiDateTimeUtc(item, "received_by_bank_at");
+            if (string.IsNullOrWhiteSpace(status) || !IsPaidProviderStatus(status)
+                || string.IsNullOrWhiteSpace(chargeId) || !receivedAt.HasValue)
+                return null;
+            return new BankSlipPaymentEvidence
+            {
+                ChargeId = chargeId,
+                ReceivedAtUtc = receivedAt.Value,
+                IsDateOnly = DateTime.TryParseExact(
+                    GetScalarString(item, "received_by_bank_at"), "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
+            };
         }
-
-        return null;
+        catch (System.Text.Json.JsonException) { return null; }
     }
 
     private static decimal? GetProviderValue(JsonElement element)

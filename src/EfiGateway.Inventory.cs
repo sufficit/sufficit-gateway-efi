@@ -151,7 +151,8 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
                     item.ChargeId,
                     context,
                     cancellationToken).ConfigureAwait(false);
-                if (detail == null || !detail.PaidAtUtc.HasValue)
+                item.ReceivedByBankAtUtc ??= detail?.PaidAtUtc;
+                if (detail == null || !detail.PaymentConfirmedAtUtc.HasValue)
                 {
                     incomplete = true;
                     _logger.LogWarning(
@@ -160,7 +161,7 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
                     continue;
                 }
 
-                item.PaidAtUtc = detail.PaidAtUtc;
+                item.PaidAtUtc = detail.PaymentConfirmedAtUtc;
                 item.PaidValue ??= detail.SettledValue;
             }
             catch (Exception exception) when (
@@ -253,9 +254,9 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
                 Status = MapStatus(providerStatus),
                 Value = ReadCents(item, "total") ?? 0m,
                 CreatedAtUtc = ReadEfiDateTimeUtc(item, "created_at"),
-                // The reconciliation date is exclusively the provider's
-                // documented payment timestamp: payment.paid_at.
+                // Retain confirmation separately from the banking receipt day.
                 PaidAtUtc = ReadEfiPaymentDateUtc(payment),
+                ReceivedByBankAtUtc = ReadEfiDateTimeUtc(payment, "received_by_bank_at"),
                 PaidValue = ReadCents(payment, "paid_value")
                     ?? ReadCents(item, "paid_value")
             });

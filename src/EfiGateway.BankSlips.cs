@@ -501,9 +501,10 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
             // charge creation and charge detail responses.
             SettledValue = ReadCents(data, "paid_value")
                 ?? ReadCents(payment, "paid_value"),
-            // Do not substitute received_by_bank_at or history timestamps:
-            // payment.paid_at is the only payment date used by reconciliation.
-            PaidAtUtc = ReadEfiPaymentDateUtc(payment),
+            // Bank receipt drives the financial day. EFI confirmation can be
+            // days later and must never overwrite a known receipt date.
+            PaidAtUtc = ReadEfiDateTimeUtc(payment, "received_by_bank_at"),
+            PaymentConfirmedAtUtc = ReadEfiPaymentDateUtc(payment),
             BarCode = barCode,
             HtmlUrl = htmlUrl,
             PdfUrl = pdfUrl,
