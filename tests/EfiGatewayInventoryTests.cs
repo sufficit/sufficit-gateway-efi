@@ -61,6 +61,25 @@ public sealed class EfiGatewayInventoryTests
     }
 
     [Fact]
+    public async Task IdentifiedReceiptDoesNotBecomeAConfirmedPaymentDate()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""
+            {"code":200,"data":[{"id":711008225,"total":5000,"status":"identified",
+              "payment":{"received_by_bank_at":"2026-09-21","paid_at":null}}]}
+            """);
+        IBankSlipProviderInventoryGateway gateway = GatewayTestFactory.CreateEfi(handler);
+        var result = await gateway.GetInventoryAsync(InventoryRequest(), InventoryContext(), CancellationToken.None);
+        var item = Assert.Single(result.Items);
+        Assert.Equal(BankSlipStatus.Ready, item.Status);
+        Assert.Null(item.PaidAtUtc);
+        Assert.Null(item.ReceivedByBankAtUtc);
+        Assert.Equal(1, result.RequestCount);
+        Assert.False(result.Partial);
+    }
+
+    [Fact]
     public async Task InventoryAdvancesWithPageInsteadOfIgnoredOffset()
     {
         var handler = new RecordingHttpMessageHandler();

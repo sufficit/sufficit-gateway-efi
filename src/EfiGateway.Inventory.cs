@@ -256,7 +256,11 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
                 CreatedAtUtc = ReadEfiDateTimeUtc(item, "created_at"),
                 // Retain confirmation separately from the banking receipt day.
                 PaidAtUtc = ReadEfiPaymentDateUtc(payment),
-                ReceivedByBankAtUtc = ReadEfiDateTimeUtc(payment, "received_by_bank_at"),
+                // `identified` can already expose a receipt day, but it is
+                // still Ready locally until EFI confirms the payment.
+                ReceivedByBankAtUtc = IsPaidProviderStatus(providerStatus)
+                    ? ReadEfiDateTimeUtc(payment, "received_by_bank_at")
+                    : null,
                 PaidValue = ReadCents(payment, "paid_value")
                     ?? ReadCents(item, "paid_value")
             });
