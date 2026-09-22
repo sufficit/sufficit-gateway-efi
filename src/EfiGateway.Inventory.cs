@@ -116,7 +116,7 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
         {
             partial = true;
             warningCode ??= "payment_detail_unavailable";
-            warningMessage ??= "A EFI não informou payment.paid_at na lista e uma ou mais consultas detalhadas não retornaram esse campo. Os itens carregados foram preservados.";
+            warningMessage ??= "A EFI não informou o dia recebido no banco ou a confirmação do pagamento na lista, e uma ou mais consultas detalhadas também não retornaram esses campos. Os itens carregados foram preservados.";
         }
 
         return new ProviderBankSlipInventoryResult
@@ -130,6 +130,14 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
         };
     }
 
+    /// <summary>
+    /// The list endpoint routinely omits payment.received_by_bank_at even when
+    /// it already exposes payment.paid_at. Reconciliation compares the banking
+    /// receipt day and must never substitute the provider confirmation for it,
+    /// so the charge detail is queried whenever either financial fact is
+    /// missing. Reading only paid_at would leave the receipt day permanently
+    /// unresolved for every charge the list answered completely.
+    /// </summary>
     private async Task<(int RequestCount, bool Incomplete)> EnrichMissingPaymentDatesAsync(
         IReadOnlyList<ProviderBankSlipInventoryItem> items,
         BankSlipGatewayContext context,
@@ -138,7 +146,8 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
         var requestCount = 0;
         var incomplete = false;
         var candidates = items
-            .Where(item => IsPaidProviderStatus(item.ProviderStatus) && !item.PaidAtUtc.HasValue)
+            .Where(item => IsPaidProviderStatus(item.ProviderStatus)
+                && (!item.PaidAtUtc.HasValue || !item.ReceivedByBankAtUtc.HasValue))
             .ToArray();
 
         foreach (var item in candidates)
@@ -151,18 +160,40 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
                     item.ChargeId,
                     context,
                     cancellationToken).ConfigureAwait(false);
-                item.ReceivedByBankAtUtc ??= detail?.PaidAtUtc;
-                if (detail == null || !detail.PaymentConfirmedAtUtc.HasValue)
+                if (detail == null)
+                {
+                    incomplete = true;
+                    _logger.LogWarning(
+                        "EFI charge {ChargeId} is paid but its detail response could not be read.",
+                        item.ChargeId);
+                    continue;
+                }
+
+                // ProviderBankSlipResult keeps the banking receipt in PaidAtUtc
+                // (payment.received_by_bank_at) and the provider confirmation in
+                // PaymentConfirmedAtUtc (payment.paid_at). Each one fills only
+                // its own inventory field; neither stands in for the other.
+                item.ReceivedByBankAtUtc ??= detail.PaidAtUtc;
+                item.PaidAtUtc ??= detail.PaymentConfirmedAtUtc;
+                item.PaidValue ??= detail.SettledValue;
+
+                if (!item.PaidAtUtc.HasValue)
                 {
                     incomplete = true;
                     _logger.LogWarning(
                         "EFI charge {ChargeId} is paid but its detail response did not contain payment.paid_at.",
                         item.ChargeId);
-                    continue;
                 }
 
-                item.PaidAtUtc = detail.PaymentConfirmedAtUtc;
-                item.PaidValue ??= detail.SettledValue;
+                // A receipt day the provider genuinely never published is an
+                // observed fact, not an incomplete enumeration. Flagging it as
+                // partial would stop the report from listing local-only records.
+                if (!item.ReceivedByBankAtUtc.HasValue)
+                {
+                    _logger.LogWarning(
+                        "EFI charge {ChargeId} is paid but neither the list nor its detail contained payment.received_by_bank_at.",
+                        item.ChargeId);
+                }
             }
             catch (Exception exception) when (
                 !cancellationToken.IsCancellationRequested
@@ -171,7 +202,7 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
                 incomplete = true;
                 _logger.LogWarning(
                     exception,
-                    "Could not load EFI charge {ChargeId} detail while reading payment.paid_at.",
+                    "Could not load EFI charge {ChargeId} detail while reading its payment dates.",
                     item.ChargeId);
             }
         }

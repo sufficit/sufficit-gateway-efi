@@ -28,6 +28,20 @@ public sealed class EfiGatewayInventoryTests
               ]
             }
             """);
+        handler.EnqueueJson("""
+            {
+              "code": 200,
+              "data": {
+                "charge_id": 711008222,
+                "status": "paid",
+                "payment": {
+                  "received_by_bank_at": "2026-08-11 10:00:00",
+                  "paid_at": "2026-08-11T10:00:00.000Z",
+                  "paid_value": 5000
+                }
+              }
+            }
+            """);
         IBankSlipProviderInventoryGateway gateway = GatewayTestFactory.CreateEfi(handler);
 
         var result = await gateway.GetInventoryAsync(
@@ -53,7 +67,11 @@ public sealed class EfiGatewayInventoryTests
         Assert.Equal(50m, item.PaidValue);
         Assert.Equal(new DateTime(2026, 8, 10, 23, 23, 31, DateTimeKind.Utc), item.CreatedAtUtc);
         Assert.Equal(new DateTime(2026, 8, 11, 10, 0, 0, DateTimeKind.Utc), item.PaidAtUtc);
-        Assert.Equal(1, result.RequestCount);
+        // The list omitted the banking receipt day, so the charge detail is
+        // queried even though payment.paid_at was already available.
+        Assert.Equal(new DateTime(2026, 8, 11, 13, 0, 0, DateTimeKind.Utc), item.ReceivedByBankAtUtc);
+        Assert.Equal(2, result.RequestCount);
+        Assert.False(result.Partial);
         Assert.False(result.Truncated);
         Assert.Equal(
             "https://cobrancas-h.api.efipay.com.br/v1/charges?charge_type=billet&begin_date=2026-08-10&end_date=2026-08-16&limit=100&page=1",
@@ -202,6 +220,53 @@ public sealed class EfiGatewayInventoryTests
         Assert.Equal(50m, item.PaidValue);
         Assert.Equal(2, result.RequestCount);
         Assert.False(result.Partial);
+    }
+
+    [Fact]
+    public async Task PaidChargeWithoutAnyReceiptDayStaysUnverifiedWithoutMarkingPartial()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""
+            {
+              "code": 200,
+              "data": [
+                {
+                  "id": 711008226,
+                  "total": 5000,
+                  "status": "paid",
+                  "created_at": "2026-08-10 20:23:31",
+                  "payment": { "paid_at": "2026-08-11T10:00:00.000Z", "paid_value": 5000 }
+                }
+              ]
+            }
+            """);
+        handler.EnqueueJson("""
+            {
+              "code": 200,
+              "data": {
+                "charge_id": 711008226,
+                "status": "paid",
+                "payment": { "paid_at": "2026-08-11T10:00:00.000Z", "paid_value": 5000 }
+              }
+            }
+            """);
+        IBankSlipProviderInventoryGateway gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetInventoryAsync(
+            InventoryRequest(),
+            InventoryContext(),
+            CancellationToken.None);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(new DateTime(2026, 8, 11, 10, 0, 0, DateTimeKind.Utc), item.PaidAtUtc);
+        // The provider never published a banking receipt for this charge. That
+        // is an observed fact, so the enumeration stays complete and local-only
+        // records remain detectable by the reconciliation report.
+        Assert.Null(item.ReceivedByBankAtUtc);
+        Assert.Equal(2, result.RequestCount);
+        Assert.False(result.Partial);
+        Assert.Null(result.WarningCode);
     }
 
     [Fact]
