@@ -12,3 +12,5 @@ coverage/
 *.token
 # Worktrees (padrao): arvores de trabalho em <repo>/.worktrees/
 **/.worktrees/
+# Python bytecode cache
+**/__pycache__/
