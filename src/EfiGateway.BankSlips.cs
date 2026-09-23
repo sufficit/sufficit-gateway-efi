@@ -503,7 +503,8 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
                 ?? ReadCents(payment, "paid_value"),
             // Bank receipt drives the financial day. EFI confirmation can be
             // days later and must never overwrite a known receipt date.
-            PaidAtUtc = ReadEfiDateTimeUtc(payment, "received_by_bank_at"),
+            PaidAtUtc = ReadEfiDateTimeUtc(payment, "received_by_bank_at")
+                ?? ReadIdentifiedReceiptFromHistory(data, providerStatus),
             PaymentConfirmedAtUtc = ReadEfiPaymentDateUtc(payment),
             BarCode = barCode,
             HtmlUrl = htmlUrl,

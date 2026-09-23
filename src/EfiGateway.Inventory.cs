@@ -327,6 +327,38 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
     private static DateTime? ReadEfiPaymentDateUtc(JsonElement element)
         => ReadEfiDateTimeUtc(element, "paid_at");
 
+    /// <summary>
+    /// GET /v1/charge/:id omits payment.received_by_bank_at while a charge is
+    /// only "identified", but the same response keeps the audit history. The
+    /// "Pagamento identificado em dd/MM/yyyy" entry carries the event instant,
+    /// which is the banking receipt day observed by the provider. Production
+    /// responses verified on 2026-09-22: the history timestamp follows the
+    /// list's received_by_bank_at by seconds, never crossing the civil day.
+    /// </summary>
+    private static DateTime? ReadIdentifiedReceiptFromHistory(JsonElement data, string providerStatus)
+    {
+        if (!string.Equals(providerStatus?.Trim(), "identified", StringComparison.OrdinalIgnoreCase))
+            return null;
+        if (data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("history", out var history)
+            || history.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var entry in history.EnumerateArray())
+        {
+            var message = GetScalarString(entry, "message");
+            if (message != null
+                && message.TrimStart().StartsWith("Pagamento identificado em", StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadEfiDateTimeUtc(entry, "created_at");
+            }
+        }
+
+        return null;
+    }
+
     private static DateTime? ReadEfiDateTimeUtc(JsonElement element, string propertyName)
     {
         var value = GetScalarString(element, propertyName);

@@ -537,6 +537,66 @@ public class EfiGatewayBankSlipTests
         Assert.DoesNotContain("token-123", providerEvent.Payload, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task IdentifiedNotificationReadsBankReceiptFromChargeDetail()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600}""");
+        handler.EnqueueJson(
+            """
+            {
+              "code": 200,
+              "data": [
+                {
+                  "id": 19,
+                  "type": "charge",
+                  "custom_id": "8c732677a5ea4f33a8e13dfcdb538411",
+                  "status": { "current": "identified" },
+                  "identifiers": { "charge_id": 12345 },
+                  "created_at": "2026-09-22T14:03:00Z",
+                  "value": 19000
+                }
+              ]
+            }
+            """);
+        handler.EnqueueJson(
+            """
+            {
+              "code": 200,
+              "data": {
+                "charge_id": 12345,
+                "status": "identified",
+                "payment": { "method": "banking_billet" },
+                "history": [
+                  { "message": "Cobrança criada", "created_at": "2026-09-22 14:28:13" },
+                  { "message": "Pagamento identificado em 22/09/2026", "created_at": "2026-09-22 15:09:11" }
+                ]
+              }
+            }
+            """);
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+
+        var result = await gateway.GetNotificationAsync(
+            "identified-token",
+            CreateContext(),
+            CancellationToken.None);
+
+        var providerEvent = Assert.Single(result.Events);
+        Assert.Equal(BankSlipStatus.Ready, providerEvent.Status);
+        Assert.Equal("identified", providerEvent.ProviderStatus);
+        // Neither the notification nor the charge detail carries
+        // payment.received_by_bank_at for "identified" charges: the audit
+        // history entry is the authoritative receipt day.
+        Assert.Null(providerEvent.PaidAtUtc);
+        Assert.Equal(
+            new DateTime(2026, 9, 22, 18, 9, 11, DateTimeKind.Utc),
+            providerEvent.ReceivedByBankAtUtc);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(
+            "https://cobrancas-h.api.efipay.com.br/v1/charge/12345",
+            handler.Requests[2].Uri.AbsoluteUri);
+    }
+
     [Theory]
     [InlineData("2026-09-18", "2026-09-18T03:00:00Z", true)]
     [InlineData("2026-09-18 10:15:30", "2026-09-18T13:15:30Z", false)]

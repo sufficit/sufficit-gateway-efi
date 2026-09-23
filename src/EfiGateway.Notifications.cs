@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Sufficit.Finance;
 using System.Globalization;
 using System.Net;
@@ -61,11 +62,17 @@ public sealed partial class EfiGateway : IBankSlipProviderNotificationGateway, I
                         : MapStatus(providerStatus),
                     EventAtUtc = ReadEfiDateTimeUtc(item, "created_at"),
                     PaidAtUtc = ReadEfiDateTimeUtc(item, "received_by_bank_at"),
+                    // Same source field as PaidAtUtc: the bank receipt day. It
+                    // feeds the pending-receipt evidence when the status is not
+                    // paid yet, and stays null when Efí omits it.
+                    ReceivedByBankAtUtc = ReadEfiDateTimeUtc(item, "received_by_bank_at"),
                     Value = GetProviderValue(item),
                     Payload = item.GetRawText()
                 });
             }
         }
+
+        await EnrichPendingReceiptsAsync(events, context, cancellationToken).ConfigureAwait(false);
 
         return new BankSlipProviderNotificationBatch
         {
@@ -134,5 +141,59 @@ public sealed partial class EfiGateway : IBankSlipProviderNotificationGateway, I
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Efí notification payloads omit the banking receipt day while a charge is
+    /// still "identified". The charge detail carries it, so every pending
+    /// charge is enriched from its own authoritative endpoint. A failed detail
+    /// lookup keeps the batch alive: the receipt day simply stays unknown
+    /// until the provider confirms the payment.
+    /// </summary>
+    private async Task EnrichPendingReceiptsAsync(
+        List<BankSlipProviderNotificationEvent> events,
+        BankSlipGatewayContext context,
+        CancellationToken cancellationToken)
+    {
+        var pendingGroups = events
+            .Where(item => !string.IsNullOrWhiteSpace(item.ChargeId))
+            .Where(item => string.Equals(
+                    item.ProviderStatus?.Trim(),
+                    "identified",
+                    StringComparison.OrdinalIgnoreCase)
+                && !item.ReceivedByBankAtUtc.HasValue)
+            .GroupBy(item => item.ChargeId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (pendingGroups.Length == 0)
+            return;
+
+        foreach (var group in pendingGroups)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var detail = await GetAsync(
+                    group.Key!,
+                    context,
+                    cancellationToken).ConfigureAwait(false);
+                if (detail?.PaidAtUtc is not { } receivedByBankAtUtc)
+                    continue;
+
+                // ProviderBankSlipResult keeps the banking receipt in PaidAtUtc
+                // (payment.received_by_bank_at). Each field fills only its own
+                // destination; neither stands in for the other.
+                foreach (var item in group)
+                    item.ReceivedByBankAtUtc = receivedByBankAtUtc;
+            }
+            catch (Exception exception) when (
+                !cancellationToken.IsCancellationRequested
+                && IsRecoverableInventoryFailure(exception))
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Could not read the banking receipt day for pending Efí charge {ChargeId}.",
+                    group.Key);
+            }
+        }
     }
 }
