@@ -466,7 +466,8 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
                 ["zipcode"] = OnlyDigits(address.PostalCode),
                 ["city"] = address.City,
                 ["complement"] = address.Complement,
-                ["state"] = address.State
+                // Snapshots stored before the payer was normalized may still hold "ba".
+                ["state"] = address.State!.Trim().ToUpperInvariant()
             };
         }
 

@@ -422,6 +422,24 @@ public class EfiGatewayBankSlipTests
     }
 
     [Fact]
+    public async Task CreateAsyncSendsStateAcronymInUpperCase()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""{"code":200,"data":{"charge_id":12345,"status":"new"}}""");
+        handler.EnqueueJson(
+            """{"code":200,"data":{"charge_id":12345,"status":"waiting","barcode":"0019000009","link":"https://sandbox.efi.example/billet/12345"}}""");
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+        var request = CreateIssueRequest();
+        request.Payer.Address!.State = " ba ";
+
+        await gateway.CreateAsync(request, CreateContext(), CancellationToken.None);
+
+        Assert.Contains("\"state\":\"BA\"", handler.Requests[2].Body);
+        Assert.DoesNotContain("\"state\":\"ba\"", handler.Requests[2].Body);
+    }
+
+    [Fact]
     public async Task CreateAsyncNormalizesBrazilCountryCodeInPhonePayload()
     {
         var handler = new RecordingHttpMessageHandler();
