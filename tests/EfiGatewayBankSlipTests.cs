@@ -1,6 +1,7 @@
 using Sufficit.Finance;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using Xunit;
 
 namespace Sufficit.Gateway.Efi.Tests;
@@ -36,6 +37,49 @@ public class EfiGatewayBankSlipTests
         Assert.Equal("financeiro@example.test", request.Payer.Email);
         Assert.StartsWith("Basic ", handler.Requests[0].Headers["Authorization"].Single());
         Assert.Equal("Bearer token-123", handler.Requests[1].Headers["Authorization"].Single());
+    }
+
+    [Fact]
+    public async Task CreateAsyncSendsOneChargeLinePerItem()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        handler.EnqueueJson("""{"code":200,"data":{"charge_id":12345,"status":"new"}}""");
+        handler.EnqueueJson(
+            """{"code":200,"data":{"charge_id":12345,"status":"waiting","barcode":"0019000009","link":"https://sandbox.efi.example/billet/12345"}}""");
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+        var request = CreateIssueRequest();
+        request.Value = 150.50m;
+        request.Items = new[]
+        {
+            new BankSlipItem { Title = "Hospedagem 10/2026", Amount = 100.25m },
+            new BankSlipItem { Title = "Hospedagem 11/2026", Amount = 50.25m }
+        };
+
+        await gateway.CreateAsync(request, CreateContext(), CancellationToken.None);
+
+        using var body = JsonDocument.Parse(handler.Requests[1].Body!);
+        var lines = body.RootElement.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal(2, lines.Length);
+        Assert.Equal("Hospedagem 10/2026", lines[0].GetProperty("name").GetString());
+        Assert.Equal(10025, lines[0].GetProperty("value").GetInt32());
+        Assert.Equal(5025, lines[1].GetProperty("value").GetInt32());
+    }
+
+    [Fact]
+    public async Task CreateAsyncRefusesItemsThatDoNotAddUpToTheValue()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        handler.EnqueueJson("""{"access_token":"token-123","expires_in":600,"token_type":"Bearer"}""");
+        var gateway = GatewayTestFactory.CreateEfi(handler);
+        var request = CreateIssueRequest();
+        request.Value = 150m;
+        request.Items = new[] { new BankSlipItem { Title = "Hospedagem", Amount = 100m } };
+
+        var error = await Assert.ThrowsAsync<BankSlipGatewayException>(
+            () => gateway.CreateAsync(request, CreateContext(), CancellationToken.None));
+
+        Assert.Equal("efi_items_value_mismatch", error.ErrorCode);
     }
 
     [Fact]

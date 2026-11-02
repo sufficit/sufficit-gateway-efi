@@ -155,15 +155,7 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
         };
         var payload = new
         {
-            items = new[]
-            {
-                new
-                {
-                    name = string.IsNullOrWhiteSpace(request.Description) ? "Serviços Sufficit" : request.Description,
-                    value = amountInCents,
-                    amount = 1
-                }
-            },
+            items = BuildChargeItems(request, amountInCents),
             metadata
         };
 
@@ -188,6 +180,40 @@ public sealed partial class EfiGateway : IBankSlipGateway, IBankSlipProviderDiag
         }
 
         return chargeId;
+    }
+
+    private static object[] BuildChargeItems(BankSlipGatewayIssueRequest request, int amountInCents)
+    {
+        if (request.Items.Count == 0)
+        {
+            return new object[]
+            {
+                new
+                {
+                    name = string.IsNullOrWhiteSpace(request.Description) ? "Serviços Sufficit" : request.Description,
+                    value = amountInCents,
+                    amount = 1
+                }
+            };
+        }
+
+        var lines = request.Items
+            .Select(item => new
+            {
+                name = item.Title,
+                value = checked((int)decimal.Round(item.Amount * 100m, 0, MidpointRounding.AwayFromZero)),
+                amount = 1
+            })
+            .ToArray();
+        if (lines.Sum(line => line.value) != amountInCents)
+        {
+            throw new BankSlipGatewayException(
+                BankSlipErrorCategory.Validation,
+                "efi_items_value_mismatch",
+                "The bank slip items do not add up to its value.");
+        }
+
+        return lines.Cast<object>().ToArray();
     }
 
     private async Task<ProviderBankSlipResult> AssignBankSlipAsync(
