@@ -90,3 +90,27 @@ Estados não pagos não atribuem confirmação. Na consulta detalhada,
 `payment.paid_at` já representa essa confirmação. Nenhuma data é substituída
 pelo horário de captura ou processamento interno. A projeção financeira pode
 mostrar a confirmação no texto quando seu dia brasileiro difere do recebimento.
+
+## Regra de fuso das datas do provedor
+
+Decisão do mantenedor em 12/11/2026: Efí e Asaas são provedores brasileiros.
+Datas/horários recebidos **sem fuso explícito** devem ser interpretados como
+**GMT−3 (UTC−03:00, Brasília)**, independentemente do fuso do servidor.
+
+- Respeitar `Z` ou qualquer offset explicitamente informado; não aplicar −03:00
+  novamente a um instante que já possui fuso.
+- Para normalizar um horário sem fuso, assumir −03:00 antes de converter para UTC.
+  Exemplo: `2026-11-03 07:00:00` corresponde a `2026-11-03T10:00:00Z`.
+- Quando uma data de recebimento sem hora precisar representar um instante,
+  a meia-noite de Brasília corresponde a `03:00:00Z` do mesmo dia.
+- Datas puramente civis, como vencimentos `DateOnly`, continuam datas civis;
+  não deslocar seu dia mediante conversão de fuso.
+- Relógios de captura/processamento não substituem recebimento ou confirmação.
+  O padrão GMT−3 é fixo; não presumir outro offset para dados históricos sem
+  evidência explícita do provedor.
+
+Estado da implementação: O leitor atual já usa Brasília para valores sem offset, mas consulta a zona
+`America/Sao_Paulo`, que pode aplicar horário de verão histórico. Esse caso ainda
+precisa de alinhamento com o padrão fixo −03:00.
+
+Registro: [atividade de documentação](docs/activities/202611121221-provider-date-timezone.md).

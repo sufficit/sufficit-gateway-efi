@@ -359,6 +359,11 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
         return null;
     }
 
+    // Provider date contract (maintainer, 2026-11-12): Efí and Asaas timestamps
+    // without an explicit zone mean fixed UTC-03:00 (Brasília), never server-local
+    // time or assumed UTC. Explicit Z/offsets take precedence. See README.md.
+    // Historical caveat: the zone lookup below still applies São Paulo DST rules;
+    // aligning historical offset-less values with the fixed -03:00 contract is pending.
     private static DateTime? ReadEfiDateTimeUtc(JsonElement element, string propertyName)
     {
         var value = GetScalarString(element, propertyName);
