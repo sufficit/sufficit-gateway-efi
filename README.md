@@ -81,3 +81,12 @@ dotnet test tests/Sufficit.Gateway.Efi.Tests.csproj
 ```
 
 Os testes usam um `HttpMessageHandler` controlado e não acessam contas reais.
+
+## Recebimento e confirmação
+
+Nas notificações, `received_by_bank_at` representa o recebimento bancário;
+`created_at` da transição paga alimenta `PaymentConfirmedAtUtc`, separadamente.
+Estados não pagos não atribuem confirmação. Na consulta detalhada,
+`payment.paid_at` já representa essa confirmação. Nenhuma data é substituída
+pelo horário de captura ou processamento interno. A projeção financeira pode
+mostrar a confirmação no texto quando seu dia brasileiro difere do recebimento.

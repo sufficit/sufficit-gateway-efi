@@ -588,6 +588,7 @@ public class EfiGatewayBankSlipTests
         var providerEvent = Assert.Single(result.Events);
         Assert.Equal(BankSlipProviderCodes.Efi, result.ProviderCode);
         Assert.Equal("17", providerEvent.EventId);
+        Assert.Equal(new DateTime(2026, 8, 1, 21, 30, 0, DateTimeKind.Utc), providerEvent.PaymentConfirmedAtUtc);
         Assert.Equal("12345", providerEvent.ChargeId);
         Assert.Equal("charge", providerEvent.EventType);
         Assert.Equal("paid", providerEvent.ProviderStatus);

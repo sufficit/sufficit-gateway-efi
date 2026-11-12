@@ -62,6 +62,9 @@ public sealed partial class EfiGateway : IBankSlipProviderNotificationGateway, I
                         : MapStatus(providerStatus),
                     EventAtUtc = ReadEfiDateTimeUtc(item, "created_at"),
                     PaidAtUtc = ReadEfiDateTimeUtc(item, "received_by_bank_at"),
+                    PaymentConfirmedAtUtc = IsPaidProviderStatus(providerStatus ?? string.Empty)
+                        ? ReadEfiDateTimeUtc(item, "created_at")
+                        : null,
                     // Same source field as PaidAtUtc: the bank receipt day. It
                     // feeds the pending-receipt evidence when the status is not
                     // paid yet, and stays null when Efí omits it.
