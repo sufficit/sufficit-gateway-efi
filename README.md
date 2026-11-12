@@ -109,8 +109,10 @@ Datas/horários recebidos **sem fuso explícito** devem ser interpretados como
   O padrão GMT−3 é fixo; não presumir outro offset para dados históricos sem
   evidência explícita do provedor.
 
-Estado da implementação: O leitor atual já usa Brasília para valores sem offset, mas consulta a zona
-`America/Sao_Paulo`, que pode aplicar horário de verão histórico. Esse caso ainda
-precisa de alinhamento com o padrão fixo −03:00.
+Estado da implementação: valores sem fuso usam UTC−03:00 fixo, inclusive em
+datas históricas, sem aplicar horário de verão. Valores com `Z` ou offset explícito
+mantêm seu instante, inclusive offsets positivos e sem dois-pontos.
 
 Registro: [atividade de documentação](docs/activities/202611121221-provider-date-timezone.md).
+
+Pendência corrigida: [validação e publicação dos leitores de datas](docs/activities/202611121239-provider-date-parsing.md).

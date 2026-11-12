@@ -665,7 +665,10 @@ public class EfiGatewayBankSlipTests
     [InlineData("2026-09-18 10:15:30", "2026-09-18T13:15:30Z", false)]
     [InlineData("2026-09-18T23:15:30-03:00", "2026-09-19T02:15:30Z", false)]
     [InlineData("2026-09-18T00:00:00Z", "2026-09-18T00:00:00Z", false)]
-    [InlineData("2018-01-15", "2018-01-15T02:00:00Z", true)]
+    [InlineData("2026-09-18T07:00:00+02:00", "2026-09-18T05:00:00Z", false)]
+    [InlineData("2026-09-18T07:00:00+0200", "2026-09-18T05:00:00Z", false)]
+    [InlineData("2026-09-18T07:00:00+02", "2026-09-18T05:00:00Z", false)]
+    [InlineData("2018-01-15", "2018-01-15T03:00:00Z", true)]
     [InlineData("invalid", null, false)]
     [InlineData(null, null, false)]
     public async Task NotificationDatesUseBrazilianCalendarUnlessOffsetIsExplicit(

@@ -362,18 +362,15 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
     // Provider date contract (maintainer, 2026-11-12): Efí and Asaas timestamps
     // without an explicit zone mean fixed UTC-03:00 (Brasília), never server-local
     // time or assumed UTC. Explicit Z/offsets take precedence. See README.md.
-    // Historical caveat: the zone lookup below still applies São Paulo DST rules;
-    // aligning historical offset-less values with the fixed -03:00 contract is pending.
     private static DateTime? ReadEfiDateTimeUtc(JsonElement element, string propertyName)
     {
         var value = GetScalarString(element, propertyName);
         if (string.IsNullOrWhiteSpace(value))
             return null;
 
-        var hasExplicitOffset = value.EndsWith("Z", StringComparison.OrdinalIgnoreCase)
-            || (value.Length >= 6
-                && (value[value.Length - 6] == '+' || value[value.Length - 6] == '-')
-                && value[value.Length - 3] == ':');
+        value = value.Trim();
+        var hasExplicitOffset = value.Length > 10 && System.Text.RegularExpressions.Regex.IsMatch(
+            value, @"(?:[zZ]|[+-]\d{2}(?::?\d{2})?)$");
         if (hasExplicitOffset
             && DateTimeOffset.TryParse(
                 value,
@@ -391,21 +388,10 @@ public sealed partial class EfiGateway : IBankSlipProviderInventoryGateway
             out var localProviderTime))
         {
             var unspecified = DateTime.SpecifyKind(localProviderTime, DateTimeKind.Unspecified);
-            return TimeZoneInfo.ConvertTimeToUtc(unspecified, GetEfiTimeZone());
+            return new DateTimeOffset(unspecified, TimeSpan.FromHours(-3)).UtcDateTime;
         }
 
         return null;
     }
 
-    private static TimeZoneInfo GetEfiTimeZone()
-    {
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById("E. South America Standard Time");
-        }
-    }
 }
